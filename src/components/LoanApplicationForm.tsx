@@ -161,7 +161,7 @@ const LoanApplicationForm = ({ initialBvn = "" }: LoanApplicationFormProps) => {
 
       // Send confirmation email
       try {
-        await supabase.functions.invoke('send-loan-notification', {
+        const { data: emailData, error: emailError } = await supabase.functions.invoke('send-loan-notification', {
           body: {
             type: 'submission',
             applicationId: newApplication.id,
@@ -171,6 +171,12 @@ const LoanApplicationForm = ({ initialBvn = "" }: LoanApplicationFormProps) => {
             loanType: validatedData.loanType,
           },
         });
+        
+        if (emailError) {
+          console.error('Email notification error:', emailError);
+        } else {
+          console.log('Email notification sent successfully:', emailData);
+        }
       } catch (emailError) {
         console.error('Failed to send confirmation email:', emailError);
         // Don't fail the application if email fails
