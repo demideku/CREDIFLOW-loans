@@ -7,7 +7,7 @@ const Index = () => {
   return (
     <>
       <Navbar />
-      <main className="pt-20">
+      <main className="pt-16">
         <Hero />
         <Features />
       </main>
