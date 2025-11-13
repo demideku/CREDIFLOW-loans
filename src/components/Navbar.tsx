@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, LogOut, User, Shield } from "lucide-react";
+import { TrendingUp, LogOut, User, Shield, Bell } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   DropdownMenu,
@@ -81,12 +81,20 @@ const Navbar = () => {
               Apply
             </Link>
             {user && (
-              <Link 
-                to="/my-applications"
-                className="text-foreground hover:text-primary transition-colors font-medium"
-              >
-                My Applications
-              </Link>
+              <>
+                <Link 
+                  to="/my-applications"
+                  className="text-foreground hover:text-primary transition-colors font-medium"
+                >
+                  My Applications
+                </Link>
+                <Link 
+                  to="/notifications"
+                  className="text-foreground hover:text-primary transition-colors font-medium"
+                >
+                  Notifications
+                </Link>
+              </>
             )}
             <Link 
               to="/about"
