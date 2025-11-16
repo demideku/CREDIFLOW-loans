@@ -14,6 +14,7 @@ import Calculator from "./pages/Calculator";
 import Apply from "./pages/Apply";
 import About from "./pages/About";
 import MyApplications from "./pages/MyApplications";
+import Repayment from "./pages/Repayment";
 import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 
@@ -32,6 +33,7 @@ const AppContent = () => {
         <Route path="/apply" element={<Apply />} />
         <Route path="/about" element={<About />} />
         <Route path="/my-applications" element={<MyApplications />} />
+        <Route path="/repayment/:id" element={<Repayment />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/auth" element={<Auth />} />
         <Route path="/admin" element={<Admin />} />

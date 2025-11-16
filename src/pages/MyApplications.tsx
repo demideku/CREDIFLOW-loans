@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, FileText } from "lucide-react";
 
 interface LoanApplication {
   id: string;
@@ -19,6 +21,7 @@ interface LoanApplication {
 }
 
 const MyApplications = () => {
+  const navigate = useNavigate();
   const [applications, setApplications] = useState<LoanApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
@@ -187,7 +190,7 @@ const MyApplications = () => {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="grid grid-cols-2 gap-4 text-sm mb-4">
                         <div>
                           <p className="text-muted-foreground">Application ID</p>
                           <p className="font-medium">{app.id.slice(0, 8)}...</p>
@@ -209,6 +212,16 @@ const MyApplications = () => {
                           <p className="font-medium">{app.full_name}</p>
                         </div>
                       </div>
+                      
+                      {app.status.toLowerCase() === 'approved' && (
+                        <Button 
+                          onClick={() => navigate(`/repayment/${app.id}`)}
+                          className="w-full"
+                        >
+                          <FileText className="w-4 h-4 mr-2" />
+                          View Repayment Schedule
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
