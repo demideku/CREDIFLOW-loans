@@ -75,7 +75,7 @@ const LoanCalculator = () => {
                   id="term"
                   min={6}
                   max={60}
-                  step={6}
+                  step={1}
                   value={[term]}
                   onValueChange={(value) => setTerm(value[0])}
                   className="cursor-pointer"
