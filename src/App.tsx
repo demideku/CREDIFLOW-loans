@@ -10,6 +10,7 @@ import Admin from "./pages/Admin";
 import AdminApplications from "./pages/AdminApplications";
 import AdminReports from "./pages/AdminReports";
 import AdminNotifications from "./pages/AdminNotifications";
+import AdminPayments from "./pages/AdminPayments";
 import Calculator from "./pages/Calculator";
 import Apply from "./pages/Apply";
 import About from "./pages/About";
@@ -40,6 +41,7 @@ const AppContent = () => {
         <Route path="/admin/applications" element={<AdminApplications />} />
         <Route path="/admin/reports" element={<AdminReports />} />
         <Route path="/admin/notifications" element={<AdminNotifications />} />
+        <Route path="/admin/payments" element={<AdminPayments />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
       </Routes>

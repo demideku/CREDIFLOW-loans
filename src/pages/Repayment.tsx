@@ -6,8 +6,12 @@ import Footer from "@/components/Footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Calendar, DollarSign } from "lucide-react";
+import { Loader2, Calendar, DollarSign, Upload, CreditCard } from "lucide-react";
+import { format } from "date-fns";
 
 interface LoanApplication {
   id: string;
@@ -30,6 +34,14 @@ interface PaymentSchedule {
   balance: number;
 }
 
+interface Payment {
+  id: string;
+  amount_paid: number;
+  payment_date: string;
+  status: string;
+  payment_proof_url: string | null;
+}
+
 const Repayment = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -37,6 +49,10 @@ const Repayment = () => {
   const [application, setApplication] = useState<LoanApplication | null>(null);
   const [loading, setLoading] = useState(true);
   const [schedule, setSchedule] = useState<PaymentSchedule[]>([]);
+  const [amountPaid, setAmountPaid] = useState("");
+  const [paymentProof, setPaymentProof] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
   const INTEREST_RATE = 15; // 15% annual interest rate
 
@@ -53,6 +69,7 @@ const Repayment = () => {
     }
 
     fetchApplication(session.user.id);
+    fetchPayments();
   };
 
   const fetchApplication = async (userId: string) => {
@@ -84,14 +101,88 @@ const Repayment = () => {
     }
   };
 
+  const fetchPayments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("loan_application_id", id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setPayments(data || []);
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+    }
+  };
+
+  const handleSubmitPayment = async () => {
+    if (!amountPaid || parseFloat(amountPaid) <= 0) {
+      toast({
+        title: "Invalid Amount",
+        description: "Please enter a valid amount",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      let proofUrl = null;
+      if (paymentProof) {
+        const fileExt = paymentProof.name.split('.').pop();
+        const filePath = `${user.id}/${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('loan-documents')
+          .upload(filePath, paymentProof);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('loan-documents')
+          .getPublicUrl(filePath);
+
+        proofUrl = publicUrl;
+      }
+
+      const { error } = await supabase.from("payments").insert({
+        loan_application_id: id,
+        user_id: user.id,
+        amount_paid: parseFloat(amountPaid),
+        payment_proof_url: proofUrl,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Payment submitted successfully! Awaiting admin verification.",
+      });
+
+      setAmountPaid("");
+      setPaymentProof(null);
+      fetchPayments();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: "Failed to submit payment: " + error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const generateRepaymentSchedule = (app: LoanApplication) => {
     const loanAmount = app.loan_amount;
     const quarterlyRate = INTEREST_RATE / 100 / 4; // Quarterly interest rate
     
     // For full payment, show single payment with total interest
     if (app.payment_type === 'full') {
-      // Calculate total interest for full repayment
-      // Determine number of months based on loan type
       let numMonths = 12;
       if (app.loan_type === 'salary') numMonths = 12;
       else if (app.loan_type === 'business') numMonths = 24;
@@ -100,7 +191,6 @@ const Repayment = () => {
       const totalInterest = loanAmount * (INTEREST_RATE / 100) * (numMonths / 12);
       const totalPayment = loanAmount + totalInterest;
       
-      // Due date is 1 month after application
       const dueDate = new Date(app.created_at);
       dueDate.setMonth(dueDate.getMonth() + 1);
       
@@ -116,65 +206,45 @@ const Repayment = () => {
     }
     
     // For installment payment, calculate quarterly schedule
-    // Determine number of quarters based on loan type
-    let numMonths = 12; // Default
+    let numMonths = 12;
     if (app.loan_type === 'salary') numMonths = 12;
     else if (app.loan_type === 'business') numMonths = 24;
     else if (app.loan_type === 'mortgage') numMonths = 60;
     
     const numQuarters = Math.ceil(numMonths / 3);
-    
-    // Calculate quarterly payment using amortization formula
     const quarterlyPayment = (loanAmount * quarterlyRate * Math.pow(1 + quarterlyRate, numQuarters)) / 
-                            (Math.pow(1 + quarterlyRate, numQuarters) - 1);
-
-    let balance = loanAmount;
-    const scheduleData: PaymentSchedule[] = [];
+                             (Math.pow(1 + quarterlyRate, numQuarters) - 1);
+    
+    const tempSchedule: PaymentSchedule[] = [];
+    let remainingBalance = loanAmount;
     const startDate = new Date(app.created_at);
-
+    
     for (let i = 1; i <= numQuarters; i++) {
-      const interestPayment = balance * quarterlyRate;
+      const interestPayment = remainingBalance * quarterlyRate;
       const principalPayment = quarterlyPayment - interestPayment;
-      balance -= principalPayment;
-
-      // Calculate due date (add 3 months for each quarter)
+      remainingBalance -= principalPayment;
+      
       const dueDate = new Date(startDate);
       dueDate.setMonth(dueDate.getMonth() + (i * 3));
-
-      scheduleData.push({
+      
+      tempSchedule.push({
         period: i,
         dueDate: dueDate.toLocaleDateString('en-NG', { year: 'numeric', month: 'short', day: 'numeric' }),
         payment: quarterlyPayment,
         principal: principalPayment,
         interest: interestPayment,
-        balance: Math.max(0, balance)
+        balance: Math.max(0, remainingBalance)
       });
     }
-
-    setSchedule(scheduleData);
-  };
-
-  const getTotalRepayment = () => {
-    return schedule.reduce((sum, item) => sum + item.payment, 0);
-  };
-
-  const getTotalInterest = () => {
-    return schedule.reduce((sum, item) => sum + item.interest, 0);
+    
+    setSchedule(tempSchedule);
   };
 
   if (loading) {
     return (
-      <>
-        <Navbar />
-        <main className="pt-20">
-          <div className="container mx-auto px-4 py-16">
-            <div className="flex justify-center items-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin" />
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </>
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
     );
   }
 
@@ -182,163 +252,212 @@ const Repayment = () => {
     return null;
   }
 
+  const totalPayment = schedule.reduce((sum, item) => sum + item.payment, 0);
+  const totalInterest = schedule.reduce((sum, item) => sum + item.interest, 0);
+
   return (
-    <>
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
       <Navbar />
-      <main className="pt-20">
-        <div className="container mx-auto px-4 py-16">
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center mb-12">
-              <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                Repayment Schedule
-              </h1>
-              <p className="text-lg text-muted-foreground">
-                Your loan repayment details and schedule
-              </p>
-            </div>
-
-            {/* Loan Summary */}
-            <div className="grid md:grid-cols-3 gap-6 mb-8">
-              <Card>
-                <CardHeader>
-                  <CardDescription>Loan Amount</CardDescription>
-                  <CardTitle className="text-3xl">
-                    ₦{application.loan_amount.toLocaleString()}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardDescription>Total Repayment</CardDescription>
-                  <CardTitle className="text-3xl text-primary">
-                    ₦{getTotalRepayment().toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardDescription>Total Interest</CardDescription>
-                  <CardTitle className="text-3xl text-accent">
-                    ₦{getTotalInterest().toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-            </div>
-
-            {/* Loan Details */}
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle>Loan Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid md:grid-cols-3 gap-6">
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Loan Type</p>
-                    <p className="font-semibold capitalize">{application.loan_type}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Purpose</p>
-                    <p className="font-semibold capitalize">{application.loan_purpose}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Status</p>
-                    <Badge className="capitalize">{application.status}</Badge>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Interest Rate</p>
-                    <p className="font-semibold">{INTEREST_RATE}% per year</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Payment Type</p>
-                    <Badge className="capitalize">
-                      {application.payment_type === 'full' ? 'Full Payment (Lump Sum)' : 'Quarterly Installments'}
-                    </Badge>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Payment Frequency</p>
-                    <p className="font-semibold">
-                      {application.payment_type === 'full' ? 'One-time Payment' : 'Every 3 Months (Quarterly)'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-1">Number of Payments</p>
-                    <p className="font-semibold">{schedule.length} payments</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Payment Schedule */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5" />
-                  Payment Schedule
-                </CardTitle>
-                <CardDescription>
-                  {application.payment_type === 'full' 
-                    ? 'Your one-time payment details' 
-                    : 'Your quarterly payment breakdown'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Payment #</TableHead>
-                        <TableHead>Due Date</TableHead>
-                        <TableHead className="text-right">Payment</TableHead>
-                        <TableHead className="text-right">Principal</TableHead>
-                        <TableHead className="text-right">Interest</TableHead>
-                        <TableHead className="text-right">Remaining Balance</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {schedule.map((payment) => (
-                        <TableRow key={payment.period}>
-                          <TableCell className="font-medium">{payment.period}</TableCell>
-                          <TableCell>{payment.dueDate}</TableCell>
-                          <TableCell className="text-right font-semibold">
-                            ₦{payment.payment.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ₦{payment.principal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ₦{payment.interest.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ₦{payment.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <DollarSign className="w-5 h-5 text-primary mt-0.5" />
-                    <div className="text-sm">
-                      <p className="font-semibold mb-1">Payment Information</p>
-                      <p className="text-muted-foreground">
-                        {application.payment_type === 'full' 
-                          ? 'This is a one-time lump sum payment that includes the principal amount plus accrued interest. Payment is due within one month of application approval.'
-                          : 'Payments are due every 3 months. Each payment includes both principal and interest. Your remaining balance decreases with each payment until the loan is fully paid off.'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+      
+      <div className="container mx-auto px-4 py-12">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold mb-2">Repayment Schedule</h1>
+          <p className="text-muted-foreground">View your loan repayment details and schedule</p>
         </div>
-      </main>
+
+        <div className="grid gap-6 md:grid-cols-2 mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Loan Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Loan Amount:</span>
+                <span className="font-semibold">₦{application.loan_amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Loan Type:</span>
+                <Badge variant="outline">{application.loan_type}</Badge>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Payment Type:</span>
+                <Badge variant="outline">
+                  {application.payment_type === 'full' ? 'Full Payment' : 'Installments'}
+                </Badge>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Interest Rate:</span>
+                <span className="font-semibold">{INTEREST_RATE}% per annum</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Total Repayment</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Principal:</span>
+                <span className="font-semibold">₦{application.loan_amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Interest:</span>
+                <span className="font-semibold text-yellow-600">₦{totalInterest.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between border-t pt-3">
+                <span className="text-lg font-semibold">Total Amount:</span>
+                <span className="text-lg font-bold text-primary">₦{totalPayment.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Payment Schedule
+            </CardTitle>
+            <CardDescription>
+              {application.payment_type === 'full' 
+                ? 'Single payment due in 1 month'
+                : `Quarterly payments over ${schedule.length} quarters`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Period</TableHead>
+                  <TableHead>Due Date</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead>Principal</TableHead>
+                  <TableHead>Interest</TableHead>
+                  <TableHead>Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {schedule.map((item) => (
+                  <TableRow key={item.period}>
+                    <TableCell>{item.period}</TableCell>
+                    <TableCell>{item.dueDate}</TableCell>
+                    <TableCell className="font-semibold">₦{item.payment.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell>₦{item.principal.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell>₦{item.interest.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell>₦{item.balance.toLocaleString('en-NG', { maximumFractionDigits: 2 })}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Bank Details & Payment Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Make Payment
+            </CardTitle>
+            <CardDescription>
+              Transfer to the account below and upload proof of payment
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Bank Details */}
+            <div className="bg-muted p-4 rounded-lg space-y-2">
+              <h3 className="font-semibold text-sm">Bank Details</h3>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Bank Name:</span>
+                  <p className="font-medium">FCMB</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Account Number:</span>
+                  <p className="font-medium">1006748865</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Upload Form */}
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="amount">Amount Paid (₦)</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  placeholder="Enter amount paid"
+                  value={amountPaid}
+                  onChange={(e) => setAmountPaid(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="proof">Payment Proof (Optional)</Label>
+                <Input
+                  id="proof"
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => setPaymentProof(e.target.files?.[0] || null)}
+                />
+              </div>
+              <Button
+                onClick={handleSubmitPayment}
+                disabled={uploading}
+                className="w-full"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {uploading ? "Submitting..." : "Submit Payment"}
+              </Button>
+            </div>
+
+            {/* Payment History */}
+            {payments && payments.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="font-semibold text-sm">Payment History</h3>
+                <div className="space-y-2">
+                  {payments.map((payment) => (
+                    <div key={payment.id} className="border rounded-lg p-3 text-sm">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium">₦{Number(payment.amount_paid).toLocaleString()}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {format(new Date(payment.payment_date), "PPP")}
+                          </p>
+                        </div>
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            payment.status === "verified"
+                              ? "bg-green-100 text-green-700"
+                              : payment.status === "rejected"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-yellow-100 text-yellow-700"
+                          }`}
+                        >
+                          {payment.status}
+                        </span>
+                      </div>
+                      {payment.payment_proof_url && (
+                        <a
+                          href={payment.payment_proof_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline mt-2 inline-block"
+                        >
+                          View Proof
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <Footer />
-    </>
+    </div>
   );
 };
 
