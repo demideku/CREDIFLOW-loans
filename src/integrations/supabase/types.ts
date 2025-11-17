@@ -116,6 +116,56 @@ export type Database = {
         }
         Relationships: []
       }
+      payments: {
+        Row: {
+          amount_paid: number
+          created_at: string
+          id: string
+          loan_application_id: string
+          payment_date: string
+          payment_proof_url: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          amount_paid: number
+          created_at?: string
+          id?: string
+          loan_application_id: string
+          payment_date?: string
+          payment_proof_url?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          amount_paid?: number
+          created_at?: string
+          id?: string
+          loan_application_id?: string
+          payment_date?: string
+          payment_proof_url?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_loan_application_id_fkey"
+            columns: ["loan_application_id"]
+            isOneToOne: false
+            referencedRelation: "loan_applications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null
