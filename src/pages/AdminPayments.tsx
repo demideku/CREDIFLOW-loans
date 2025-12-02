@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { CheckCircle, XCircle, ExternalLink } from "lucide-react";
+import { CheckCircle, XCircle, ExternalLink, ArrowLeft } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const AdminPayments = () => {
   const queryClient = useQueryClient();
@@ -61,6 +62,10 @@ const AdminPayments = () => {
 
   return (
     <div className="container mx-auto py-8">
+      <Link to="/admin" className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6">
+        <ArrowLeft className="h-4 w-4" />
+        Back to Dashboard
+      </Link>
       <Card>
         <CardHeader>
           <CardTitle>Payment Verification</CardTitle>
